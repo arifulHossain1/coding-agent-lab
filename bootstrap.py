@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 
 from adapters.models.scripted import ScriptedClient
+from adapters.models.ollama import OllamaClient
 from adapters.sandbox.repair_tools import RepairTools
 from adapters.sandbox.runner import create_workspace
 from core.models import TestResult
@@ -44,7 +45,7 @@ def scripted_replies(case: str, workspace: Path) -> list[str]:
 
 
 class _VisibleClient:
-    """Publish scripted model replies immediately without changing the agent."""
+    """Publish model replies without validating or rejecting their actions."""
 
     def __init__(self, client, emit):
         self.client, self.emit = client, emit
@@ -54,8 +55,15 @@ class _VisibleClient:
     def chat(self, messages):
         reply = self.client.chat(messages)
         self.decision += 1
-        self.summary = json.loads(reply).get("summary")
         self.emit({"event": "model_response", "decision": self.decision, "response": reply})
+        # Optional display metadata only; malformed replies still reach RepairAgent.
+        self.summary = None
+        try:
+            metadata = json.loads(reply)
+            if isinstance(metadata, dict) and isinstance(metadata.get("summary"), str):
+                self.summary = metadata["summary"]
+        except (ValueError, TypeError, RecursionError):
+            pass
         return reply
 
 
@@ -88,13 +96,15 @@ class _VisibleTools:
 
 
 def build_service(provider: str = "scripted",
-                  on_event: Callable[[dict], None] | None = None) -> RepairService:
-    """Connect a fresh scripted client and real tools for each repair attempt."""
-    if provider != "scripted":
-        raise ValueError("Only the scripted provider is supported")
+                  on_event: Callable[[dict], None] | None = None,
+                  model: str | None = None, temperature: float = 0.0) -> RepairService:
+    """Connect the selected chat provider and real tools for each repair attempt."""
+    if provider not in {"scripted", "ollama"}:
+        raise ValueError("Provider must be scripted or ollama")
 
     def create_agent(case: str, workspace: Path) -> RepairAgent:
-        client = ScriptedClient(scripted_replies(case, workspace))
+        client = (ScriptedClient(scripted_replies(case, workspace)) if provider == "scripted"
+                  else OllamaClient(model=model, temperature=temperature))
         tools = RepairTools(workspace)
         if on_event:
             client = _VisibleClient(client, on_event)
