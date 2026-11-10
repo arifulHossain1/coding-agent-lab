@@ -15,7 +15,14 @@ def main(argv: list[str] | None = None) -> int:
     repair = commands.add_parser("repair", help="Repair a disposable copy of an eval project")
     repair.add_argument("project", help="Instructor project path, e.g. evals/arithmetic")
     repair.add_argument("--provider", choices=["scripted"], default="scripted")
+    commands.add_parser("ui", help="Start the local Gradio repair interface")
     args = parser.parse_args(argv)
+
+    if args.command == "ui":
+        from adapters.gradio_ui import create_demo
+
+        create_demo().launch(server_name="127.0.0.1", share=False, inbrowser=False)
+        return 0
 
     def print_event(event: dict) -> None:
         print(json.dumps(event), flush=True)
